@@ -1,0 +1,10 @@
+# 가상환경 및 IDE
+.venv/
+venv/
+__pycache__/
+.idea/
+.DS_Store
+
+# 환경 설정 / 비밀 키 파일
+.env
+*.local.json
