@@ -5,6 +5,7 @@ from langchain_groq import ChatGroq
 from typing import TypedDict
 from langgraph.graph import StateGraph
 from langchain_core.messages import HumanMessage, SystemMessage
+from server.chat.service.tts_service import generate_tts_audio
 
 
 # 나중에 함수 자체를 바꿔야함 (오디오 파일 생성까지 연결된 서브그래프 가져오기/ 지금은 스크립트만)
@@ -40,6 +41,7 @@ class SupervisorState(TypedDict):
     user_input: str
     route: str  # "radio_show" or "chat"
     output: str
+    audio_base64: str 
 
 
 # %%
@@ -80,6 +82,7 @@ def route_decision(state: SupervisorState) -> SupervisorState:
 # 일반 고도화 챗봇 : chat_agent - 젤 위에서 바꾸기
 # podcast_app
 
+
 def run_podcast(state: SupervisorState) -> SupervisorState:
     result = podcast_app.invoke({
         "user_input": state["user_input"],
@@ -88,14 +91,17 @@ def run_podcast(state: SupervisorState) -> SupervisorState:
         "turn_count": 0
     })
 
-    
-
+    script = result["history"]
+    audio_base64 = generate_tts_audio(script)
 
     return {
-        "output": result["history"],
+        "output": script,
+        "audio_base64": audio_base64,  # ✅ 이제 LangGraph state에 반영됨
         "route": "podcast",
         "user_input": state["user_input"]
     }
+
+
 
 
 def run_chat_llm(state: SupervisorState) -> SupervisorState:

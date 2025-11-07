@@ -26,10 +26,10 @@ async def chat_endpoint(request: ChatRequest):
     사용자 메시지를 받아 LangGraph로 처리
     """
     result = await process_chat_message(request.message)
-
-    # 결과 db에 저장
-
-    return {"response": result}
+    return {
+        "response": result.get("output"),
+        "audio": result.get("audio_base64")  # ✅ 이제 Postman에서도 값이 들어옴
+    }
 
 
 # ✨ 추가: 디버그용 엔드포인트 (토큰 없이 테스트)
