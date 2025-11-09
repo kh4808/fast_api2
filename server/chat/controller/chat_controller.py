@@ -1,47 +1,53 @@
-# app/api/chat/controller.py
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+from typing import Optional
 from server.chat.service.chat_service import process_chat_message
+from server.auth_manager import get_current_user
+from server.models import User
 
 router = APIRouter()
 
-
-# 요청 바디 모델
 class ChatRequest(BaseModel):
     message: str
-
-
-# uri 모음
-@router.get("/chat")
-async def chat_log():
-    """
-    이전 채팅 모음을 반환
-    """
-    return {"response": "Chat initialized"}
+    initialChat: Optional[bool] = False  # ✅ 첫 대화 여부만 전달
 
 
 @router.post("/chat")
-async def chat_endpoint(request: ChatRequest):
+async def chat_endpoint(
+    request: ChatRequest,
+    current_user: User = Depends(get_current_user)
+):
     """
     사용자 메시지를 받아 LangGraph로 처리
+    - initialChat=True → 새로운 chatOrder 생성
+    - initialChat=False → 기존 chatOrder의 마지막 chatNum 불러와서 +1
     """
-    result = await process_chat_message(request.message)
+    result = await process_chat_message(
+        message=request.message,
+        user_id=current_user.id,
+        initial_chat=request.initialChat
+    )
+
     return {
         "response": result.get("output"),
-        "audio": result.get("audio_base64")  # ✅ 이제 Postman에서도 값이 들어옴
+        "audio": result.get("audio_base64"),
+        "chatNum": result.get("chatNum"),
+        "chatOrder": result.get("chatOrder"),
     }
 
 
-# ✨ 추가: 디버그용 엔드포인트 (토큰 없이 테스트)
+# 디버그용 (JWT 없이)
 @router.post("/chat/debug")
 async def chat_debug_endpoint(request: ChatRequest):
-    """
-    디버그용: 토큰 없이 채팅 테스트
-    Flutter 앱 개발 중 사용
-    """
-    result = await process_chat_message(request.message)
+    result = await process_chat_message(
+        message=request.message,
+        user_id=1,
+        initial_chat=request.initialChat
+    )
 
     return {
         "user_message": request.message,
-        "ai_response": result
+        "ai_response": result.get("output"),
+        "chatNum": result.get("chatNum"),
+        "chatOrder": result.get("chatOrder"),
     }

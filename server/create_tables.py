@@ -1,6 +1,7 @@
 # create_tables.py
-from database import Base, engine
-from models import LevelTestLog
+from server.database import Base, engine
+from server.models import LevelTestLog
+
 
 print("📦 Creating tables...")
 Base.metadata.create_all(bind=engine)

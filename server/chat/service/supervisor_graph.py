@@ -1,55 +1,49 @@
-import server.chat.service.groq_subgraph as groq_subgraph
+# server/chat/service/supervisor_graph.py
+from typing import TypedDict, Optional
 from dotenv import load_dotenv
+from langgraph.graph import StateGraph
+from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 from langchain_groq import ChatGroq
-from typing import TypedDict
-from langgraph.graph import StateGraph
-from langchain_core.messages import HumanMessage, SystemMessage
+
+import server.chat.service.groq_subgraph as groq_subgraph
 from server.chat.service.tts_service import generate_tts_audio
-
-
-# 나중에 함수 자체를 바꿔야함 (오디오 파일 생성까지 연결된 서브그래프 가져오기/ 지금은 스크립트만)
-podcast_app = groq_subgraph.build_podcast_graph()
+from server.chat.service.chat_logic_service import handle_chat_flow  # ✅ DB/비즈니스 로직 분리
 
 load_dotenv()
 
-# summary_llm = ChatOpenAI(model="gpt-4o-mini")
-# agent_manager_llm = ChatOpenAI(model="gpt-4o")
-# host_llm = ChatOpenAI(model="gpt-4o")
-# guest_llm = ChatOpenAI(model="gpt-4o")
-# history_summary_llm = ChatOpenAI(model="gpt-4o-mini")
+# ▶️ 모델 분리 (요약/관심사/대응)
+CHAT_GENERATE_LLM = ChatOpenAI(model="gpt-4o")
+SUMMARY_LLM = ChatOpenAI(model="gpt-4o-mini")
+ANALYSIS_LLM = ChatOpenAI(model="gpt-4o-mini")
 
-# llm = ChatOpenAI(
-#     model="qwen:4b",                     # Ollama 모델 이름
-#     base_url="http://127.0.0.1:11434/v1",# Ollama 서버 주소
-#     api_key="none"                       # 필요 없음, dummy 값
-# )
-
-# 같은 LLM을 여러 역할에 재사용
-#summary_llm = llm
-#agent_manager_llm = llm
-#host_llm = llm
-#guest_llm = llm
-#history_summary_llm = llm
-
-
+# (기존) 라우팅/팟캐스트
 supervisor_llm = ChatOpenAI(model="gpt-4o")
-chat_agent = ChatGroq(model="llama-3.3-70b-versatile")
+podcast_app = groq_subgraph.build_podcast_graph()
+# 참고: 일반 챗용으로 Groq 모델을 쓰고 싶으면 handle_chat_flow 내부가 아닌 여기에서 교체하면 됨
+# chat_agent = ChatGroq(model="llama-3.3-70b-versatile")
 
-
-class SupervisorState(TypedDict):
+class SupervisorState(TypedDict, total=False):
+    # 입력/출력
     user_input: str
-    route: str  # "radio_show" or "chat"
     output: str
-    audio_base64: str 
+    audio_base64: str
 
+    # 라우팅
+    route: str  # "podcast" | "chat"
 
-# %%
+    # 채팅 관리
+    userId: int
+    chatNum: int                # 현재까지의 누적 대화 횟수(요청 시 전달 받음) — 응답 시 +1 반영
+    chatOrder: int  
+    initialChat: bool             # 세션 ID
+    history: str                # (옵션) 프롬프트용
+    history_summary: str        # (옵션) 프롬프트용
+
 
 def route_decision(state: SupervisorState) -> SupervisorState:
-    user_input = state["user_input"]
-
-    messages = [
+    """podcast or chat 분기 결정"""
+    msg = [
         SystemMessage("""
             You are a routing assistant.
             Your task is to decide whether the user’s input should be handled by the podcast generator or by the general chat assistant.
@@ -65,121 +59,56 @@ def route_decision(state: SupervisorState) -> SupervisorState:
     
             Respond with only one word: either "podcast" or "chat".
         """),
-        HumanMessage(user_input)
+        HumanMessage(state["user_input"])
     ]
-    route = supervisor_llm.invoke(messages).content.strip().lower()
-
-    if "podcast" in route:
-        route = "podcast"
-    else:
-        route = "chat"
-
-    return {"route": route, "user_input": user_input, "output": ""}
-
-
-# %%
-
-# 일반 고도화 챗봇 : chat_agent - 젤 위에서 바꾸기
-# podcast_app
+    route_raw = supervisor_llm.invoke(msg).content.strip().lower()
+    route = "podcast" if "podcast" in route_raw else "chat"
+    return {**state, "route": route}
 
 
 def run_podcast(state: SupervisorState) -> SupervisorState:
-    result = podcast_app.invoke({
+    """팟캐스트 분기: 기존 그래프 + TTS"""
+    res = podcast_app.invoke({
         "user_input": state["user_input"],
         "history": "",
         "history_summary": "Radio show is started. You need to speak",
         "turn_count": 0
     })
-
-    script = result["history"]
-    audio_base64 = generate_tts_audio(script)
-
-    return {
-        "output": script,
-        "audio_base64": audio_base64,  # ✅ 이제 LangGraph state에 반영됨
-        "route": "podcast",
-        "user_input": state["user_input"]
-    }
+    script = res.get("history", "")
+    audio = generate_tts_audio(script)
+    return {**state, "output": script, "audio_base64": audio, "route": "podcast"}
 
 
+def run_chat(state: SupervisorState) -> SupervisorState:
+    """
+    ✅ 요구사항 전부 수행:
+    1) state에 필요한 변수 이미 포함
+    2) chatNum==0 → chatOrder 새로 생성(마지막 +1)
+    3) chatNum>0 → 최근 chatOrder 유지
+    4) 매 post마다 summary 최근 10개 + (chatNum % 10)개의 최근 로그로 히스토리 구성
+    5) 매 post마다 ChatLog 저장 및 chatNum 카운트, 응답에 chatNum 포함
+    6) chatNum이 10의 배수 → 최근 10개 요약 ChatSummary 저장
+    7) chatNum이 20의 배수 → 최근 20개 분석 ChatAnalysis 저장
+    모델은 각각 SUMMARY_LLM / ANALYSIS_LLM / CHAT_GENERATE_LLM 사용
+    """
+    result = handle_chat_flow(
+        state=state,
+        chat_llm=CHAT_GENERATE_LLM,
+        summary_llm=SUMMARY_LLM,
+        analysis_llm=ANALYSIS_LLM
+    )
+    return {**state, **result, "route": "chat"}
 
-
-def run_chat_llm(state: SupervisorState) -> SupervisorState:
-    msg = [
-        SystemMessage("You are a friendly and intelligent chat assistant. Provide useful answers."),
-        HumanMessage(state["user_input"])
-    ]
-    response = chat_agent.invoke(msg)
-    return {
-        "output": response.content,
-        "route": "chat",
-        "user_input": state["user_input"]
-    }
-
-
-# %%
 
 def build_supervisor_graph():
-    """Supervisor 그래프를 생성하고 컴파일된 앱을 반환"""
-    supervisor_graph = StateGraph(SupervisorState)
+    g = StateGraph(SupervisorState)
+    g.add_node("route_decision", route_decision)
+    g.add_node("podcast", run_podcast)
+    g.add_node("chat", run_chat)
 
-    # 노드 추가
-    supervisor_graph.add_node("route_decision", route_decision)
-    supervisor_graph.add_node("podcast", run_podcast)
-    supervisor_graph.add_node("chat", run_chat_llm)
-
-    # 진입점 설정
-    supervisor_graph.set_entry_point("route_decision")
-
-    # 조건부 이동 설정
-    supervisor_graph.add_conditional_edges(
-        "route_decision",
-        lambda s: s["route"],
-        {
-            "podcast": "podcast",
-            "chat": "chat"
-        }
-    )
-
-    # 그래프 컴파일 후 반환
-    return supervisor_graph.compile()
-
-# supervisor_graph = StateGraph(SupervisorState)
-
-# supervisor_graph.add_node("route_decision", route_decision)
-# supervisor_graph.add_node("podcast", run_podcast)
-# supervisor_graph.add_node("chat", run_chat_llm)
-
-# supervisor_graph.set_entry_point("route_decision")
-
-# supervisor_graph.add_conditional_edges(
-#     "route_decision",
-#     lambda s: s["route"],
-#     {
-#         "podcast": "podcast",
-#         "chat": "chat"
-#     }
-# )
-
-# supervisor_app = supervisor_graph.compile()
-
-
-# # %%
-# input1 = {
-#     "user_input": "Please make about the psychology of dieting with a podcast.",
-#     "history_summary": "Radio show is started. You need to speak",
-#     "turn_count": 0
-# }
-# result1 = supervisor_app.invoke(input1)
-# print(result1["route"])
-# print(result1["output"])
-
-# # %%
-# print(result1["output"])
-
-# # %%
-# input2 = {"user_input": "Can you summarize the pros and cons of keto diet?"}
-# result2 = supervisor_app.invoke(input2)
-# print("💬", result2["output"]) 
-
-
+    g.set_entry_point("route_decision")
+    g.add_conditional_edges("route_decision", lambda s: s["route"], {
+        "podcast": "podcast",
+        "chat": "chat"
+    })
+    return g.compile()

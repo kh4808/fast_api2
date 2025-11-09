@@ -1,22 +1,23 @@
-# app/api/chat/service.py
 import server.chat.service.supervisor_graph as supervisor_graph
 
-# 그래프 인스턴스 1회 생성 (서버 구동 시 로드)
 supervisor_app = supervisor_graph.build_supervisor_graph()
 
-async def process_chat_message(message: str):
+async def process_chat_message(message: str, user_id: int, initial_chat: bool):
     """
-    사용자의 채팅을 LangGraph에 전달하고 결과를 반환
+    LangGraph에 상태 전달.
+    - initial_chat=True → 새로운 chatOrder 생성
+    - initial_chat=False → 마지막 chatLog.chatNum 불러와서 +1
     """
     initial_state = {
         "user_input": message,
+        "route": "",
+        "output": "",
+        "audio_base64": "",
+        "userId": user_id,
+        "initialChat": initial_chat,  # ✅ 새 필드
+        "chatNum": 0,                 # 서버가 내부에서 결정
+        "chatOrder": 0,
         "history": "",
-        "history_summary": "Radio show is started. You need to speak",
-        "turn_count": 0
+        "history_summary": ""
     }
-
-    # LangGraph 실행
-    result_state = supervisor_app.invoke(initial_state)
-
-    # state 전부가 json형태로 전해짐
-    return result_state
+    return supervisor_app.invoke(initial_state)
