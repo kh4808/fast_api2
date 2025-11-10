@@ -17,7 +17,7 @@ def generate_tts_audio(script: str) -> str:
     Host/Guest 구분하여 Groq TTS로 오디오 합성 후 base64로 반환
     """
     if not script.strip():
-        raise ValueError("⚠️ Empty script. Nothing to synthesize.")
+        raise ValueError("[WARNING] Empty script. Nothing to synthesize.")
 
     lines = [line.strip() for line in script.split("\n") if line.strip()]
     segments = []
@@ -44,16 +44,16 @@ def generate_tts_audio(script: str) -> str:
         segments.append(seg + AudioSegment.silent(duration=250))
 
     if not segments:
-        raise ValueError("⚠️ No valid lines for TTS conversion")
+        raise ValueError("[WARNING] No valid lines for TTS conversion")
 
     final_audio = AudioSegment.silent(duration=500)
     for seg in segments:
         final_audio += seg
 
-    # mp3를 메모리에 바로 저장
+    # WAV를 메모리에 바로 저장 (ffmpeg 불필요)
     buffer = BytesIO()
-    final_audio.export(buffer, format="mp3")
+    final_audio.export(buffer, format="wav")
 
     audio_base64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
-    print("✅ Generated podcast audio (base64, not file)")
+    print("[OK] Generated podcast audio (WAV base64)")
     return audio_base64

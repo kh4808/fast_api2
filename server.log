@@ -1,0 +1,19 @@
+INFO:     Will watch for changes in these directories: ['C:\\Users\\HP\\OneDrive\\¹®¼­\\GitHub\\capstone\\fast_api2']
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [7456] using WatchFiles
+C:\Users\HP\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydub\utils.py:170: RuntimeWarning: Couldn't find ffmpeg or avconv - defaulting to ffmpeg, but may not work
+  warn("Couldn't find ffmpeg or avconv - defaulting to ffmpeg, but may not work", RuntimeWarning)
+Á¤º¸: Á¦°øµÈ ÆÐÅÏ¿¡ ÇØ´çµÇ´Â ÆÄÀÏÀ» Ã£Áö ¸øÇß½À´Ï´Ù.
+C:\Users\HP\AppData\Local\Programs\Python\Python311\Lib\site-packages\paddle\utils\cpp_extension\extension_utils.py:718: UserWarning: No ccache found. Please be aware that recompiling all source files may be required. You can download and install ccache from: https://github.com/ccache/ccache/blob/master/doc/INSTALL.md
+  warnings.warn(warning_message)
+[32mCreating model: ('PP-OCRv5_server_det', None)[0m
+[32mModel files already exist. Using cached files. To redownload, please delete the directory manually: `C:\Users\HP\.paddlex\official_models\PP-OCRv5_server_det`.[0m
+WARNING: Logging before InitGoogleLogging() is written to STDERR
+I1110 06:32:43.727946 17676 onednn_context.cc:81] oneDNN v3.6.2
+[32mCreating model: ('PP-OCRv5_server_rec', None)[0m
+[32mModel files already exist. Using cached files. To redownload, please delete the directory manually: `C:\Users\HP\.paddlex\official_models\PP-OCRv5_server_rec`.[0m
+INFO:     Started server process [24512]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'server\chat\service\chat_logic_service.py'. Reloading...
+ 
