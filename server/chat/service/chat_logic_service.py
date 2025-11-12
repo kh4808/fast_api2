@@ -1,64 +1,77 @@
 from datetime import datetime
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from langchain_core.messages import SystemMessage, HumanMessage
 from server.database import SessionLocal
 from server.models import ChatOrder, ChatLog, ChatSummary, ChatAnalysis
 
+
 def handle_chat_flow(state, chat_llm, summary_llm, analysis_llm):
     """
-    chat 분기 메인 플로우 (chatNum은 서버가 계산)
+    유저별 세션(chat_order) 관리 + 대화 저장 + 요약/분석 트리거 통합
     """
     db: Session = SessionLocal()
     try:
         user_id = int(state.get("userId", 0))
         initial_chat = bool(state.get("initialChat", False))
 
-        # ✅ 1. chatOrder / chatNum 결정
+        # --------------------------------------------------
+        # 1️⃣ ChatOrder 결정 (유저별 마지막 chat_order + 1)
+        # --------------------------------------------------
         if initial_chat:
-            # 새로운 chatOrder 생성
-            last_order = (
-                db.query(ChatOrder)
+            last_order_num = (
+                db.query(func.max(ChatOrder.chat_order))
                 .filter(ChatOrder.user_id == user_id)
-                .order_by(ChatOrder.chat_order.desc())
-                .first()
+                .scalar()
             )
-            new_order_id = 1 if last_order is None else int(last_order.chat_order) + 1
-            new_order = ChatOrder(chat_order=new_order_id, user_id=user_id, detail=None)
+            next_chat_order_num = 1 if last_order_num is None else last_order_num + 1
+
+            new_order = ChatOrder(chat_order=next_chat_order_num, user_id=user_id)
             db.add(new_order)
             db.commit()
             db.refresh(new_order)
-            next_chat_num = 1  # 첫 대화
+
+            chat_order_id = new_order.id
+            chat_order_num = new_order.chat_order  # ✅ 유저별 세션 번호
+            next_chat_num = 1
+
+            print(f"🆕 [New Session] user_id={user_id}, chat_order={chat_order_num}, id={chat_order_id}")
         else:
-            # 기존 chatOrder 유지
+            # ✅ 유저별 최신 세션 가져오기
             last_order = (
                 db.query(ChatOrder)
                 .filter(ChatOrder.user_id == user_id)
                 .order_by(ChatOrder.chat_order.desc())
                 .first()
             )
+
             if last_order is None:
-                # 방어적 처리
-                new_order_id = 1
-                new_order = ChatOrder(chat_order=new_order_id, user_id=user_id, detail=None)
+                new_order = ChatOrder(chat_order=1, user_id=user_id)
                 db.add(new_order)
                 db.commit()
                 db.refresh(new_order)
+                chat_order_id = new_order.id
+                chat_order_num = new_order.chat_order
                 next_chat_num = 1
+                print(f"🆕 [Fallback New Session] user_id={user_id}, chat_order=1, id={chat_order_id}")
             else:
-                new_order_id = int(last_order.chat_order)
-                # ✅ 마지막 chatNum 불러오기
+                chat_order_id = last_order.id
+                chat_order_num = last_order.chat_order  # ✅ 여기!
                 last_log = (
                     db.query(ChatLog)
-                    .filter(ChatLog.chat_order == new_order_id)
+                    .filter(ChatLog.chat_order_id == chat_order_id)
                     .order_by(ChatLog.chatNum.desc())
                     .first()
                 )
-                next_chat_num = 1 if last_log is None else int(last_log.chatNum) + 1
+                next_chat_num = 1 if last_log is None else last_log.chatNum + 1
+                print(f"💬 [Continue Chat] user_id={user_id}, chat_order={chat_order_num}, chatNum={next_chat_num}")
 
-        # 2. 요약 + 최근 로그로 히스토리 구성
+        # --------------------------------------------------
+        # 2️⃣ 히스토리 & 요약 로드
+        # --------------------------------------------------
         summaries = (
             db.query(ChatSummary)
-            .filter(ChatSummary.chat_order == new_order_id)
+            .filter(ChatSummary.chat_order_id == chat_order_id)
             .order_by(ChatSummary.id.desc())
             .limit(10)
             .all()
@@ -68,7 +81,7 @@ def handle_chat_flow(state, chat_llm, summary_llm, analysis_llm):
         take_n = next_chat_num % 10 if next_chat_num > 1 else 0
         logs = (
             db.query(ChatLog)
-            .filter(ChatLog.chat_order == new_order_id)
+            .filter(ChatLog.chat_order_id == chat_order_id)
             .order_by(ChatLog.id.desc())
             .limit(take_n)
             .all()
@@ -77,13 +90,14 @@ def handle_chat_flow(state, chat_llm, summary_llm, analysis_llm):
             f"User: {l.userChat}\nAI: {l.aiChat}" for l in reversed(logs)
         ) if logs else ""
 
-        # 3. LLM 응답 생성 (프롬프트 그대로 유지)
+        # --------------------------------------------------
+        # 3️⃣ LLM 응답 생성
+        # --------------------------------------------------
         messages = [
-            SystemMessage("""You are a friendly and intelligent friend. 
-             You talk in an empathetic manner, and you don't need to pass too long information.
-             Provide useful answers. Use the given history & summaries for context.
-             Answer in no more than three sentences
-             """),
+            SystemMessage("""You are a friendly and intelligent friend.
+            You respond empathetically, briefly (3 sentences max), and naturally.
+            Use the provided summaries and recent chats as context.
+            """),
             HumanMessage(
                 f"[Summaries(last 10)]\n{summary_text}\n\n"
                 f"[Recent chats(last {take_n})]\n{history_text}\n\n"
@@ -92,31 +106,83 @@ def handle_chat_flow(state, chat_llm, summary_llm, analysis_llm):
         ]
         ai_text = chat_llm.invoke(messages).content
 
-        # 4. 대화 저장
+        # --------------------------------------------------
+        # 4️⃣ 로그 저장
+        # --------------------------------------------------
         db.add(ChatLog(
-            chat_order=new_order_id,
+            chat_order_id=chat_order_id,
             chatNum=next_chat_num,
-            userChat=state.get("user_input",""),
+            userChat=state.get("user_input", ""),
             aiChat=ai_text,
             createdAt=datetime.utcnow()
         ))
 
-        # 5. 요약/분석 트리거
+        # --------------------------------------------------
+        # 5️⃣ 요약 / 분석 트리거
+        # --------------------------------------------------
         if next_chat_num % 10 == 0:
-            s_detail = _summarize_recent_chats(db, new_order_id, summary_llm, limit=10)
-            db.add(ChatSummary(chat_order=new_order_id, summary_num=next_chat_num // 10, detail=s_detail))
+            s_detail = _summarize_recent_chats(db, chat_order_id, summary_llm, limit=10)
+            db.add(ChatSummary(chat_order_id=chat_order_id, summary_num=next_chat_num // 10, detail=s_detail))
+            print(f"🧠 Summary created for chat_order={chat_order_num}")
 
         if next_chat_num % 20 == 0:
-            a_detail = _analyze_interests(db, new_order_id, analysis_llm, limit=20)
-            db.add(ChatAnalysis(chat_order=new_order_id, detail=a_detail, createdAt=datetime.utcnow()))
+            a_detail = _analyze_interests(db, chat_order_id, analysis_llm, limit=20)
+            db.add(ChatAnalysis(chat_order_id=chat_order_id, detail=a_detail, createdAt=datetime.utcnow()))
+            print(f"🔍 Analysis created for chat_order={chat_order_num}")
 
         db.commit()
 
+        # ✅ 응답 시 chat_order_id 대신 chat_order_num 반환
         return {
             "output": ai_text,
             "chatNum": next_chat_num,
-            "chatOrder": new_order_id
+            "chatOrder": chat_order_num,  # ✅ 세션 번호
         }
 
     finally:
         db.close()
+
+
+# --------------------------------------------------
+# 🧠 Helper: 요약 생성
+# --------------------------------------------------
+def _summarize_recent_chats(db: Session, chat_order_id: int, llm, limit: int = 10) -> str:
+    logs = (
+        db.query(ChatLog)
+        .filter(ChatLog.chat_order_id == chat_order_id)
+        .order_by(ChatLog.id.desc())
+        .limit(limit)
+        .all()
+    )
+    text = "\n".join(f"User: {l.userChat}\nAI: {l.aiChat}" for l in reversed(logs)) if logs else ""
+    if not text:
+        return "No content to summarize."
+    msg = [
+        SystemMessage("Summarize the following conversation into concise bullet points (max 10)."),
+        HumanMessage(text)
+    ]
+    return llm.invoke(msg).content
+
+
+# --------------------------------------------------
+# 🔍 Helper: 관심사 분석
+# --------------------------------------------------
+def _analyze_interests(db: Session, chat_order_id: int, llm, limit: int = 20) -> str:
+    logs = (
+        db.query(ChatLog)
+        .filter(ChatLog.chat_order_id == chat_order_id)
+        .order_by(ChatLog.id.desc())
+        .limit(limit)
+        .all()
+    )
+    text = "\n".join(f"User: {l.userChat}\nAI: {l.aiChat}" for l in reversed(logs)) if logs else ""
+    if not text:
+        return "No content to analyze."
+    msg = [
+        SystemMessage(
+            "From the dialogue, extract user's recurring interests, goals, tone, and preferences. "
+            "Return a compact JSON with fields: interests[], goals[], tone, keywords[]."
+        ),
+        HumanMessage(text)
+    ]
+    return llm.invoke(msg).content

@@ -1,6 +1,6 @@
 # create_tables.py
 from server.database import Base, engine
-from server.models import LevelTestLog
+from server.models import *
 
 
 print("📦 Creating tables...")
