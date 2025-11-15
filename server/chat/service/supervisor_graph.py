@@ -10,10 +10,18 @@ import server.chat.service.groq_subgraph as groq_subgraph
 from server.chat.service.tts_service import generate_tts_audio
 from server.chat.service.chat_logic_service import handle_chat_flow  # ✅ DB/비즈니스 로직 분리
 
+from transformers import pipeline
+
+# CEFR 판별 모델 (로컬 캐시 자동 저장됨)
+
 load_dotenv()
 
 # ▶️ 모델 분리 (요약/관심사/대응)
-#CEFR_CLASSIFIER = 
+cefr_classifier = pipeline(
+    "text-classification",
+    model="dksysd/cefr-classifier",
+    tokenizer="dksysd/cefr-classifier"
+)
 CHAT_GENERATE_LLM = ChatOpenAI(model="gpt-4o")
 
 SUMMARY_LLM = ChatOpenAI(model="gpt-4o-mini")
@@ -41,6 +49,7 @@ class SupervisorState(TypedDict, total=False):
     initialChat: bool             # 세션 ID
     history: str                # (옵션) 프롬프트용
     history_summary: str        # (옵션) 프롬프트용
+    cefr_level : str
 
 
 def route_decision(state: SupervisorState) -> SupervisorState:
@@ -81,25 +90,48 @@ def run_podcast(state: SupervisorState) -> SupervisorState:
     return {**state, "output": script, "audio_base64": audio, "route": "podcast"}
 
 
+def predict_cefr_level(user_input: str) -> str:
+    """
+    HuggingFace CEFR 분류 모델로 문장의 CEFR 레벨을 예측한다.
+    return 예: "A2", "B1", "C1" 등
+    """
+    try:
+        result = cefr_classifier(user_input)
+        label = result[0]["label"]
+        return label  # "A1" ~ "C2"
+    except Exception as e:
+        print("CEFR 분석 오류:", e)
+        return "UNKNOWN"
+
+
 def run_chat(state: SupervisorState) -> SupervisorState:
     """
-    ✅ 요구사항 전부 수행:
-    1) state에 필요한 변수 이미 포함
-    2) chatNum==0 → chatOrder 새로 생성(마지막 +1)
-    3) chatNum>0 → 최근 chatOrder 유지
-    4) 매 post마다 summary 최근 10개 + (chatNum % 10)개의 최근 로그로 히스토리 구성
-    5) 매 post마다 ChatLog 저장 및 chatNum 카운트, 응답에 chatNum 포함
-    6) chatNum이 10의 배수 → 최근 10개 요약 ChatSummary 저장
-    7) chatNum이 20의 배수 → 최근 20개 분석 ChatAnalysis 저장
-    모델은 각각 SUMMARY_LLM / ANALYSIS_LLM / CHAT_GENERATE_LLM 사용
+    요구사항 수행 흐름 + CEFR 레벨 분석 추가
     """
+
+    user_input = state.get("user_input", "")
+    if user_input:
+        # 1) CEFR 레벨 예측
+        cefr_level = predict_cefr_level(user_input)
+
+        # 2) state에 레벨 추가
+        state["cefr_level"] = cefr_level
+
+    # 3) 이후 기존 로직 실행
     result = handle_chat_flow(
         state=state,
         chat_llm=CHAT_GENERATE_LLM,
         summary_llm=SUMMARY_LLM,
         analysis_llm=ANALYSIS_LLM
     )
-    return {**state, **result, "route": "chat"}
+
+    return {
+        **state,
+        **result,
+        "route": "chat",
+        "cefr_level": state.get("cefr_level") 
+    }
+
 
 
 def build_supervisor_graph():

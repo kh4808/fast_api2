@@ -95,14 +95,20 @@ def handle_chat_flow(state, chat_llm, summary_llm, analysis_llm):
         # 3️⃣ LLM 응답 생성
         # --------------------------------------------------
         messages = [
-            SystemMessage("""You are a friendly and intelligent friend.
+            SystemMessage(f"""You are a friendly and intelligent friend.
             You respond empathetically, briefly (3 sentences max), and naturally.
             Use the provided summaries and recent chats as context.
+
+            - The user's CEFR level is provided in state["cefr_level"].
+            - Respond using vocabulary, grammar, and sentence complexity appropriate for that CEFR level.
+            - If the CEFR level is very low (A1–A2), use simpler words and shorter sentences.
+            - If the CEFR level is high (B2–C2), use more natural and complex English expressions.
             """),
             HumanMessage(
                 f"[Summaries(last 10)]\n{summary_text}\n\n"
                 f"[Recent chats(last {take_n})]\n{history_text}\n\n"
                 f"[User]\n{state.get('user_input','')}"
+                f"[CEFR Level]\n{state.get('cefr_level', 'UNKNOWN')}"
             ),
         ]
         ai_text = chat_llm.invoke(messages).content

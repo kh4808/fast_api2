@@ -33,6 +33,7 @@ async def chat_endpoint(
         "audio": result.get("audio_base64"),
         "chatNum": result.get("chatNum"),
         "chatOrder": result.get("chatOrder"),
+        "cefr_level": result.get("cefr_level")
     }
 
 
