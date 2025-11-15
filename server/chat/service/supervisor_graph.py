@@ -13,7 +13,9 @@ from server.chat.service.chat_logic_service import handle_chat_flow  # ✅ DB/�
 load_dotenv()
 
 # ▶️ 모델 분리 (요약/관심사/대응)
+#CEFR_CLASSIFIER = 
 CHAT_GENERATE_LLM = ChatOpenAI(model="gpt-4o")
+
 SUMMARY_LLM = ChatOpenAI(model="gpt-4o-mini")
 ANALYSIS_LLM = ChatOpenAI(model="gpt-4o-mini")
 

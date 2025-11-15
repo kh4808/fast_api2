@@ -1,116 +1,3 @@
-# # server/test/service/test_service.py
-# from langchain_openai import ChatOpenAI
-# from server.level_test.repository.test_repository import save_level_test_log
-
-# # ✅ 임시 저장소 (실제 서비스면 Redis나 DB로 교체 가능)
-# test_state = {
-#     "cnt": 0,
-#     "history": [],
-#     "history_summary" : []
-# }
-
-# # ✅ 테스트용 LLM (Ollama Qwen)
-# test_llm = ChatOpenAI(
-#     model="qwen:4b",
-#     base_url="http://127.0.0.1:11434/v1",
-#     api_key="none"
-# )
-
-# # ✅ 결과 분석용 LLM (GPT-4o)
-# result_llm = ChatOpenAI(model="gpt-4o")
-# summary_llm = ChatOpenAI(model="gpt-4o-mini")
-
-# # ===============================
-# # 1️⃣ 어휘 테스트 수행 (/test)
-# # ===============================
-# async def process_test_message(db, login_id: str, message: str):
-#     # 1️⃣ 카운트 증가
-#     #test_state["cnt"] += 1
-
-#     # 2️⃣ 대화 context 구성: summary + 최근 메시지
-#     context = f"""
-#     Summary of previous conversation:
-#     {test_state['history_summary']}
-
-#     Last messages:
-#     {test_state['history'][-1]['user'] if test_state['history'] else ''}
-#     {test_state['history'][-1]['ai'] if test_state['history'] else ''}
-
-#     User now says: {message}
-#     Respond naturally, in 1-2 sentences, friendly and conversational.
-#     When you answer, you don't need to provide information, but simply answer briefly just for socializing.
-#     Answer by empathizing or asking about the condition of the user
-#     """
-
-#     # 3️⃣ AI 응답 생성
-#     response = test_llm.invoke(context)
-
-#     # 4️⃣ 대화 기록 저장
-#     test_state["history"].append({
-#         "user": message,
-#         "ai": response.content
-#     })
-
-#     save_level_test_log(
-#         db=db,
-#         login_id=login_id,
-#         user_question=message,
-#         ai_response=response.content,
-#     )
-
-#     # 5️⃣ Summary 업데이트 (요약 LLM에게 전달)
-#     summary_prompt = f"""
-#     Update this conversation summary based on the new exchange.
-
-#     Old summary:
-#     {test_state['history_summary']}
-
-#     New message:
-#     User: {message}
-#     AI: {response.content}
-
-#     Provide an updated concise summary that keeps the important topics and tone.
-#     """
-#     summary_response = summary_llm.invoke(summary_prompt)
-#     test_state["history_summary"] = summary_response.content.strip()
-
-#     # 6️⃣ 결과 반환
-#     return {
-#         "cnt": test_state["cnt"],
-#         "user_message": message,
-#         "llm_reply": response.content,
-#         "summary": test_state["history_summary"]
-#     }
-
-
-# # ===============================
-# # 2️⃣ 결과 분석 (/test-result)
-# # ===============================
-# async def analyze_test_result():
-#     # if test_state["cnt"] < 100:
-#     #     return {"error": "테스트가 아직 완료되지 않았어요.", "current_cnt": test_state["cnt"]}
-
-#     # 어휘력 평가 프롬프트
-#     prompt = f"""
-#     다음은 user가 어휘력 테스트 중 남긴 100개의 대화 내용입니다.
-#     이를 종합하여 user는 CEFR 기준(A1~C2) 중 어느 수준의 어휘력을 보이는지 분석해주세요.
-#     history:
-#     {test_state["history"]}
-#     """
-
-#     # ✅ 분석 완료 후 상태 초기화
-#     test_state["cnt"] = 0
-#     test_state["history"] = []
-
-#     result = result_llm.invoke(prompt)
-
-
-#     return {
-#         "level_analysis": result.content,
-#         "total_messages": len(test_state["history"])
-#     }
-
-
 from langchain_openai import ChatOpenAI
 from server.level_test.repository.log_repository import (
     get_user_by_login_id, get_last_log,
@@ -129,7 +16,7 @@ summary_llm = ChatOpenAI(model="gpt-4o-mini")
 result_llm = ChatOpenAI(model="gpt-4o")
 
 # Spring Boot API URL
-SPRING_BOOT_URL = os.getenv("SPRING_BOOT_URL", "http://localhost:8080")
+SPRING_BOOT_URL = os.getenv("SPRING_BOOT_URL", "https://semiconical-shela-loftily.ngrok-free.dev")
 
 
 async def evaluate_level(db, user_id: int, level_test_num: int) -> str:
@@ -165,23 +52,18 @@ No other text, just the level."""
 
     try:
         print("🤖 GPT-4o-mini에게 레벨 평가 요청 중...")
-        response = summary_llm.invoke(prompt)  # gpt-4o-mini
+        response = summary_llm.invoke(prompt)
         level = response.content.strip()
         print(f"🤖 GPT 원본 응답: '{level}'")
 
-        # 유효한 레벨인지 확인
         valid_levels = ["Beginner", "A1", "A2", "B1", "B2", "C1", "C2"]
         if level not in valid_levels:
-            print(f"⚠️ 유효하지 않은 레벨 응답, 텍스트에서 추출 시도...")
-            # 레벨이 유효하지 않으면 텍스트에서 추출 시도
             for valid_level in valid_levels:
                 if valid_level in level:
                     level = valid_level
-                    print(f"✅ 추출 성공: {level}")
                     break
             else:
-                print(f"❌ 추출 실패, Beginner로 설정")
-                level = "Beginner"  # 기본값
+                level = "Beginner"
 
         return level
     except Exception as e:
@@ -189,13 +71,13 @@ No other text, just the level."""
         return "Beginner"
 
 
-async def update_user_rank_in_spring(user_id: int, rank_title: str) -> bool:
-    """Spring Boot API를 호출하여 User의 rank 업데이트"""
+async def update_user_rank_in_spring(user_id: int, rank_title: str, token: str) -> bool:
     try:
         async with httpx.AsyncClient() as client:
             response = await client.patch(
                 f"{SPRING_BOOT_URL}/api/v1/users/{user_id}/rank",
                 json={"rankTitle": rank_title},
+                headers={"Authorization": f"Bearer {token}"},   # ⭐ 추가!!!
                 timeout=10.0
             )
             if response.status_code == 200:
@@ -209,10 +91,9 @@ async def update_user_rank_in_spring(user_id: int, rank_title: str) -> bool:
         return False
 
 
-async def process_test_message(db, login_id: str, message: str):
 
-    # 몇번째 대화인지 확인하기
-    # 1️⃣ 사용자 및 최근 로그
+async def process_test_message(db, login_id: str, message: str, token: str):
+
     user = get_user_by_login_id(db, login_id)
     if not user:
         raise ValueError("User not found")
@@ -220,7 +101,7 @@ async def process_test_message(db, login_id: str, message: str):
     user_id = user.id
     last_log = get_last_log(db, user_id)
 
-    # 2️⃣ level_test_num, dialog_num 계산
+    # 대화 번호 계산
     if not last_log:
         level_test_num, dialog_num = 1, 1
     else:
@@ -229,23 +110,17 @@ async def process_test_message(db, login_id: str, message: str):
         else:
             level_test_num, dialog_num = last_log.level_test_num, last_log.diolog_num + 1
 
-
-
-
-    
-    # 10개 단위 요약 + 낱개 요약 안된 대화 불러와서 컨텍스트 생성
-    # 3️⃣ 요약 불러오기 (모든 summary)
+    # summary + recent logs 불러오기
     summaries = get_summaries_by_level(db, user_id, level_test_num)
     summary_context = "\n".join([s.summary_text for s in summaries])
 
-    # 4️⃣ 최근 n%10 대화 기록
     remainder = (dialog_num - 1) % 10
     recent_logs = get_recent_logs(db, user_id, level_test_num, remainder)
     dialogue_context = "\n".join(
         [f"User: {l.user_question}\nAI: {l.ai_response}" for l in recent_logs]
     )
 
-    # 5️⃣ context 생성
+    # 대화 context 생성
     context = f"""
     Summary of previous conversation:
     {summary_context}
@@ -259,33 +134,20 @@ async def process_test_message(db, login_id: str, message: str):
     Answer by empathizing or asking about the condition of the user
     """
 
-
-
-
-
-    # invoke 하기
-    # 6️⃣ AI 응답 생성
+    # 대답 생성
     response = test_llm.invoke(context)
     ai_reply = response.content.strip()
 
+    # 로그 저장
+    save_level_test_log(db, user_id, message, ai_reply, level_test_num, dialog_num)
 
-
-
-
-    # 7️⃣ 로그 저장
-    new_log = save_level_test_log(db, user_id, message, ai_reply, level_test_num, dialog_num)
-
-    # 🆕 현재 레벨 정보 (기본값)
     current_level = user.ranks.title if user.ranks else "Beginner"
     level_changed = False
+    evaluated_level = ""   # ⭐ 기본값: 빈 문자열
 
-    # 8️⃣ 요약 저장 (10의 배수일때만)
+    # 10번째마다 요약 + 레벨 평가
     if dialog_num % 10 == 0:
-        print(f"\n{'='*60}")
-        print(f"🔟 10번째 대화 도달! (대화 번호: {dialog_num})")
-        print(f"{'='*60}\n")
 
-        # 10개 대화 요약
         last_ten = get_recent_logs(db, user_id, level_test_num, 10)
         text = "\n".join([f"User: {x.user_question}\nAI: {x.ai_response}" for x in last_ten])
         prompt = f"Summarize the following 10 exchanges concisely:\n{text}"
@@ -294,39 +156,26 @@ async def process_test_message(db, login_id: str, message: str):
         last_summary = get_last_summary(db, user_id, level_test_num)
         next_summary_num = (last_summary.summary_num + 1) if last_summary else 1
         save_summary(db, user_id, level_test_num, next_summary_num, summary_text)
-        print(f"✅ 요약 저장 완료 (요약 번호: {next_summary_num})")
 
-        # 🆕 레벨 평가 수행
-        previous_level = user.ranks.title if user.ranks else "Beginner"
-        print(f"📊 레벨 평가 시작...")
-        print(f"   - 현재 레벨: {previous_level}")
-        print(f"   - 평가 대상: 최근 10개 대화")
-
+        # ⭐ 10개 단위 레벨 평가
         evaluated_level = await evaluate_level(db, user_id, level_test_num)
-        print(f"   - 평가 결과: {evaluated_level}")
 
-        # 레벨이 변경되었으면 Spring Boot로 업데이트
+        previous_level = user.ranks.title if user.ranks else "Beginner"
         if evaluated_level != previous_level:
-            print(f"🔄 레벨 변경 감지! {previous_level} → {evaluated_level}")
-            success = await update_user_rank_in_spring(user.id, evaluated_level)
+            success = await update_user_rank_in_spring(user.id, evaluated_level, token)
             if success:
                 current_level = evaluated_level
                 level_changed = True
-                # DB에서 user의 rank 정보 업데이트 (캐시 동기화)
                 db.refresh(user)
-                print(f"🎉 레벨 업데이트 성공! 새 레벨: {evaluated_level}")
-            else:
-                print(f"❌ Spring Boot 업데이트 실패")
-                current_level = previous_level
-        else:
-            print(f"✅ 레벨 유지: {previous_level}")
-            current_level = previous_level
 
-        print(f"\n{'='*60}\n")
+    # 100번째일 때도 evaluated_level 보내기
+    if dialog_num % 100 == 0:
 
-    # 9️⃣ 100회 도달 시 결과 분석
-    if dialog_num == 100:
-        await analyze_test_result(db, login_id, level_test_num)
+        # ⭐ 100번째 시점 간이 레벨 평가 (최근 10개 기준)
+        evaluated_level = await evaluate_level(db, user_id, level_test_num)
+
+        # 전체 100개 분석 로직 실행
+        await analyze_test_result(db=db, login_id=login_id, level_test_num=level_test_num)
 
     return {
         "user_message": message,
@@ -334,14 +183,15 @@ async def process_test_message(db, login_id: str, message: str):
         "level_test_num": level_test_num,
         "dialog_num": dialog_num,
         "current_level": current_level,
-        "level_changed": level_changed
+        "level_changed": level_changed,
+        "evaluated_level": evaluated_level   # ⭐ 여기 추가됨
     }
 
 
 async def analyze_test_result(db, login_id: str, level_test_num: int):
     user = get_user_by_login_id(db, login_id)
-    logs = get_all_logs_by_level(db, user.id, level_test_num)
 
+    logs = get_all_logs_by_level(db, user.id, level_test_num)
     history_text = "\n".join(
         [f"User: {x.user_question}\nAI: {x.ai_response}" for x in logs]
     )

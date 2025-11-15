@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from langchain_core.messages import SystemMessage, HumanMessage
 from server.database import SessionLocal
 from server.models import ChatOrder, ChatLog, ChatSummary, ChatAnalysis
+import json
 
 
 def handle_chat_flow(state, chat_llm, summary_llm, analysis_llm):
@@ -126,8 +127,7 @@ def handle_chat_flow(state, chat_llm, summary_llm, analysis_llm):
             print(f"🧠 Summary created for chat_order={chat_order_num}")
 
         if next_chat_num % 20 == 0:
-            a_detail = _analyze_interests(db, chat_order_id, analysis_llm, limit=20)
-            db.add(ChatAnalysis(chat_order_id=chat_order_id, detail=a_detail, createdAt=datetime.utcnow()))
+            _analyze_interests(db, chat_order_id, analysis_llm, limit=20)
             print(f"🔍 Analysis created for chat_order={chat_order_num}")
 
         db.commit()
@@ -167,7 +167,7 @@ def _summarize_recent_chats(db: Session, chat_order_id: int, llm, limit: int = 1
 # --------------------------------------------------
 # 🔍 Helper: 관심사 분석
 # --------------------------------------------------
-def _analyze_interests(db: Session, chat_order_id: int, llm, limit: int = 20) -> str:
+def _analyze_interests(db: Session, chat_order_id: int, llm, limit: int = 20):
     logs = (
         db.query(ChatLog)
         .filter(ChatLog.chat_order_id == chat_order_id)
@@ -175,14 +175,59 @@ def _analyze_interests(db: Session, chat_order_id: int, llm, limit: int = 20) ->
         .limit(limit)
         .all()
     )
-    text = "\n".join(f"User: {l.userChat}\nAI: {l.aiChat}" for l in reversed(logs)) if logs else ""
+
+    text = "\n".join(
+        f"User: {l.userChat}\nAI: {l.aiChat}"
+        for l in reversed(logs)
+    ) if logs else ""
+
     if not text:
         return "No content to analyze."
+
+    # ------------------------
+    # 1) LLM 호출
+    # ------------------------
     msg = [
         SystemMessage(
-            "From the dialogue, extract user's recurring interests, goals, tone, and preferences. "
-            "Return a compact JSON with fields: interests[], goals[], tone, keywords[]."
+            "From the dialogue, extract user's interests as a JSON:\n"
+            '{"interests": [...]}'
         ),
         HumanMessage(text)
     ]
-    return llm.invoke(msg).content
+
+    result = llm.invoke(msg).content
+
+    # ------------------------
+    # 2) JSON 파싱
+    # ------------------------
+    try:
+        data = json.loads(result)
+    except:
+        # 실패했으면 원본 통째로 하나만 저장
+        db.add(ChatAnalysis(
+            chat_order_id=chat_order_id,
+            detail=result,
+            createdAt=datetime.utcnow(),
+        ))
+        db.commit()
+        return result
+
+    # ------------------------
+    # 3) 오직 interests[]만 저장
+    # ------------------------
+    interests = data.get("interests", [])
+
+    # interests가 없으면 저장 안 함
+    if not interests:
+        return result
+
+    for item in interests:
+        db.add(ChatAnalysis(
+            chat_order_id=chat_order_id,
+            detail=item,     # 🔥 여기! "AI", "다이어트", "FastAPI", "Flutter"만 저장됨
+            createdAt=datetime.utcnow()
+        ))
+
+    db.commit()
+
+    return result
