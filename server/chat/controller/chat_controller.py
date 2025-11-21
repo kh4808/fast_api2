@@ -1,8 +1,11 @@
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from typing import Optional
+from sqlalchemy.orm import Session
 from server.chat.service.chat_service import process_chat_message
+from server.chat.repository.chat_log_repository import get_recent_chat_logs
 from server.auth_manager import get_current_user
+from server.database import get_db
 from server.models import User
 
 router = APIRouter()
@@ -34,6 +37,37 @@ async def chat_endpoint(
         "chatNum": result.get("chatNum"),
         "chatOrder": result.get("chatOrder"),
         "cefr_level": result.get("cefr_level")
+    }
+
+
+@router.get("/chat/logs")
+async def get_chat_logs(
+    chat_order: Optional[int] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    대화 로그를 가져옵니다.
+    - chat_order 파라미터 있음: 해당 chat_order의 최근 10개 로그
+    - chat_order 파라미터 없음: 모든 chat_order의 최근 10개 로그
+    """
+    logs = get_recent_chat_logs(
+        db=db,
+        user_id=current_user.id,
+        chat_order=chat_order,
+        limit=10
+    )
+
+    return {
+        "logs": [
+            {
+                "chatNum": log.chatNum,
+                "userChat": log.userChat,
+                "aiChat": log.aiChat,
+                "createdAt": log.createdAt.isoformat() if log.createdAt else None
+            }
+            for log in logs
+        ]
     }
 
 

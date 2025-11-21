@@ -2,9 +2,11 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
+from typing import Optional
 from server.auth_manager import get_current_user
 from server.database import get_db
 from server.level_test.service.test_service import process_test_message, analyze_test_result
+from server.level_test.repository.log_repository import get_recent_logs
 from server.models import User
 from fastapi import Header
 
@@ -22,14 +24,35 @@ async def get_token(Authorization: str = Header(...)):
 
 
 # uri 모음
-@router.get("/test")
-async def chat_log():
+@router.get("/test/logs")
+async def get_test_logs(
+    level_test_num: Optional[int] = None,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """
-    이전 채팅 모음을 반환
+    레벨 테스트 로그를 가져옵니다.
+    - level_test_num 파라미터 있음: 해당 level_test_num의 최근 10개 로그
+    - level_test_num 파라미터 없음: 모든 level_test_num의 최근 10개 로그
     """
+    logs = get_recent_logs(
+        db=db,
+        user_id=user.id,
+        level_test_num=level_test_num,
+        limit=10
+    )
 
-
-    return {"response": "Chat initialized"}
+    return {
+        "logs": [
+            {
+                "dialog_num": log.diolog_num,
+                "user_question": log.user_question,
+                "ai_response": log.ai_response,
+                "created_at": log.created_at.isoformat() if log.created_at else None
+            }
+            for log in logs
+        ]
+    }
 
 
 
