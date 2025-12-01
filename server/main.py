@@ -4,6 +4,7 @@ load_dotenv(dotenv_path="server/.env")
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
 from server.chat.controller.chat_controller import router as chat_router
 from server.level_test.controller.test_controller import router as test_router
 from server.ocr.controller import ocr_controller
@@ -11,10 +12,19 @@ from server.ocr.controller import ocr_controller
 app = FastAPI(title="LangGraph Chat API")
 
 # ============================================================================
+# ⭐ CORS 설정 (GitHub Pages + localhost + ngrok 완전 대응)
+# ============================================================================
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r'(http://localhost:\d+|http://127\.0\.0\.1:\d+|https://.*\.ngrok-free\.dev|https://.*\.ngrok-free\.app|https://.*\.ngrok\.io)',
+    allow_origin_regex=(
+        r'(http://localhost:\d+'
+        r'|http://127\.0\.0\.1:\d+'
+        r'|https://.*\.ngrok-free\.dev'
+        r'|https://.*\.ngrok-free\.app'
+        r'|https://.*\.ngrok\.io'
+        r'|https://.*\.github\.io)'  # ⭐ GitHub Pages 추가
+    ),
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
@@ -23,9 +33,8 @@ app.add_middleware(
 )
 
 # ============================================================================
-# ⭐⭐⭐ 가장 중요한 부분 (라우터 등록)
+# ⭐ 라우터 등록
 # ============================================================================
-
 app.include_router(chat_router, prefix="/api", tags=["chat"])
 app.include_router(test_router, prefix="/api", tags=["level-test"])
 app.include_router(ocr_controller.router)
@@ -62,7 +71,7 @@ async def cors_test():
     return {
         "message": "CORS is working correctly!",
         "cors_settings": {
-            "allow_origin_regex": "localhost:*, 127.0.0.1:*, *.ngrok-free.dev, *.ngrok-free.app",
+            "allow_origin_regex": "localhost:*, 127.0.0.1:*, *.ngrok, *.github.io",
             "allow_credentials": True,
             "allow_methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
         }

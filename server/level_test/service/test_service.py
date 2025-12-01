@@ -19,36 +19,67 @@ result_llm = ChatOpenAI(model="gpt-4o")
 SPRING_BOOT_URL = os.getenv("SPRING_BOOT_URL", "https://semiconical-shela-loftily.ngrok-free.dev")
 
 
-async def evaluate_level(db, user_id: int, level_test_num: int) -> str:
-    """최근 10개 대화를 기반으로 CEFR 레벨 평가"""
+async def evaluate_level(db, user_id: int, level_test_num: int, current_level: str = "Beginner") -> str:
+    """최근 10개 대화를 기반으로 CEFR 레벨 평가 (사용자 응답만 평가)"""
     last_ten = get_recent_logs(db, user_id, level_test_num, 10)
 
     if not last_ten:
-        print("⚠️ 평가할 대화 내용이 없습니다. Beginner 반환")
-        return "Beginner"
+        print("⚠️ 평가할 대화 내용이 없습니다. 현재 레벨 유지")
+        return current_level
 
     if len(last_ten) < 10:
         print(f"⚠️ 대화가 10개 미만입니다 (현재: {len(last_ten)}개)")
 
-    dialogue_text = "\n".join([f"User: {x.user_question}\nAI: {x.ai_response}" for x in last_ten])
+    # ✅ 개선 1: 사용자 응답만 추출 (AI 응답 제외)
+    user_responses = [f"{i+1}. {log.user_question}" for i, log in enumerate(last_ten)]
+    user_responses_text = "\n".join(user_responses)
 
-    prompt = f"""Analyze the following {len(last_ten)} exchanges and determine the user's English proficiency level (CEFR: A1, A2, B1, B2, C1, C2).
-Consider vocabulary richness, grammar complexity, sentence structure, and fluency.
+    # ✅ 개선 2: Few-shot 예시 추가
+    prompt = f"""Analyze the following {len(last_ten)} user responses and determine their English proficiency level according to CEFR standards.
 
-Evaluation criteria:
-- Beginner: Very basic English, simple words, many errors
-- A1: Basic phrases, simple vocabulary
-- A2: Elementary level, can describe familiar matters
-- B1: Intermediate level, can handle most travel situations
-- B2: Upper-intermediate, can interact with fluency
-- C1: Advanced, can express ideas fluently
-- C2: Proficient, near-native level
+IMPORTANT: Only evaluate the USER's responses. Do NOT consider any AI responses.
 
-Dialogue:
-{dialogue_text}
+Evaluation criteria with examples:
+
+**Beginner** (Very basic, many errors):
+Example: "I go school. Like study English. Teacher is good."
+- Very simple vocabulary, frequent grammar errors, incomplete sentences
+
+**A1** (Basic phrases):
+Example: "Hello, my name is John. I am 20 years old. I like music and sports."
+- Simple present tense, basic vocabulary, short sentences
+
+**A2** (Elementary, familiar topics):
+Example: "Yesterday I went to the park with my friends. We played soccer and had fun. The weather was nice."
+- Simple past tense, can describe daily activities, basic connectors
+
+**B1** (Intermediate, travel situations):
+Example: "I've been studying English for two years. I'm planning to travel to London next month because I want to improve my speaking skills."
+- Present perfect, future plans, because/when clauses, longer sentences
+
+**B2** (Upper-intermediate, fluent interaction):
+Example: "I've always been interested in learning languages because I believe it opens up new perspectives. Although it's challenging, I find it rewarding when I can communicate with people from different cultures."
+- Complex sentences, subordinate clauses, varied vocabulary, natural flow
+
+**C1** (Advanced, fluent expression):
+Example: "Having studied linguistics for several years, I've come to appreciate the intricate relationship between language and culture. What fascinates me most is how subtle nuances in word choice can convey entirely different meanings."
+- Sophisticated structures, rich vocabulary, abstract concepts, native-like fluency
+
+**C2** (Proficient, near-native):
+Example: "The interplay between sociolinguistic factors and language acquisition has long been a subject of scholarly debate. Notwithstanding the myriad challenges inherent in cross-cultural communication, I contend that linguistic competence transcends mere grammatical accuracy."
+- Academic/professional level, complex vocabulary, idiomatic expressions, perfect grammar
+
+Now analyze these user responses:
+{user_responses_text}
+
+Consider:
+- Vocabulary range and sophistication
+- Grammar accuracy and complexity
+- Sentence structure variety
+- Naturalness and fluency
 
 Respond with ONLY ONE of these exact words: Beginner, A1, A2, B1, B2, C1, or C2.
-No other text, just the level."""
+No explanation, just the level."""
 
     try:
         print("🤖 GPT-4o-mini에게 레벨 평가 요청 중...")
@@ -63,12 +94,15 @@ No other text, just the level."""
                     level = valid_level
                     break
             else:
-                level = "Beginner"
+                # ✅ 개선 3: 파싱 실패 시 현재 레벨 유지 (Beginner 강제 X)
+                print(f"⚠️ 유효하지 않은 응답: '{level}', 현재 레벨 유지")
+                level = current_level
 
         return level
     except Exception as e:
-        print(f"❌ 레벨 평가 중 오류 발생: {e}")
-        return "Beginner"
+        # ✅ 개선 4: 예외 발생 시 현재 레벨 유지
+        print(f"❌ 레벨 평가 중 오류 발생: {e}, 현재 레벨 유지")
+        return current_level
 
 
 async def update_user_rank_in_spring(user_id: int, rank_title: str, token: str) -> bool:
@@ -157,10 +191,10 @@ async def process_test_message(db, login_id: str, message: str, token: str):
         next_summary_num = (last_summary.summary_num + 1) if last_summary else 1
         save_summary(db, user_id, level_test_num, next_summary_num, summary_text)
 
-        # ⭐ 10개 단위 레벨 평가
-        evaluated_level = await evaluate_level(db, user_id, level_test_num)
-
+        # ⭐ 10개 단위 레벨 평가 (현재 레벨 전달)
         previous_level = user.ranks.title if user.ranks else "Beginner"
+        evaluated_level = await evaluate_level(db, user_id, level_test_num, previous_level)
+
         if evaluated_level != previous_level:
             success = await update_user_rank_in_spring(user.id, evaluated_level, token)
             if success:
@@ -172,7 +206,8 @@ async def process_test_message(db, login_id: str, message: str, token: str):
     if dialog_num % 100 == 0:
 
         # ⭐ 100번째 시점 간이 레벨 평가 (최근 10개 기준)
-        evaluated_level = await evaluate_level(db, user_id, level_test_num)
+        previous_level = user.ranks.title if user.ranks else "Beginner"
+        evaluated_level = await evaluate_level(db, user_id, level_test_num, previous_level)
 
         # 전체 100개 분석 로직 실행
         await analyze_test_result(db=db, login_id=login_id, level_test_num=level_test_num)
