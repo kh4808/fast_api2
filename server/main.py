@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from server.chat.controller.chat_controller import router as chat_router
 from server.level_test.controller.test_controller import router as test_router
 from server.ocr.controller import ocr_controller
+from server.highlight.controller.highlight_controller import router as highlight_router
 
 app = FastAPI(title="LangGraph Chat API")
 
@@ -38,6 +39,7 @@ app.add_middleware(
 app.include_router(chat_router, prefix="/api", tags=["chat"])
 app.include_router(test_router, prefix="/api", tags=["level-test"])
 app.include_router(ocr_controller.router)
+app.include_router(highlight_router)
 
 # ============================================================================
 # Health Check
@@ -52,6 +54,7 @@ async def root():
             "chat": "/api/chat",
             "level_test": "/api/test",
             "ocr": "/api/ocr/extract",
+            "highlight_process": "/api/highlight/process",
             "health": "/health"
         }
     }
