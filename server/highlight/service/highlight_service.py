@@ -1,14 +1,14 @@
 import cv2
 import numpy as np
 import base64
+import easyocr
 from .image_processor import process_highlight_image
-from server.ocr.service.ocr_service import OCRService
 
 
 class HighlightService:
     def __init__(self):
-        # OCR 서비스 초기화
-        self.ocr_service = OCRService()
+        # EasyOCR Reader 초기화 (영어만)
+        self.ocr_reader = easyocr.Reader(['en'], gpu=False)
 
     def _encode_image_to_base64(self, bgr_img):
         """이미지를 base64로 인코딩"""
@@ -39,15 +39,16 @@ class HighlightService:
         # 형광펜 하이라이트 영역 처리 (메모리에서만)
         edited_image = process_highlight_image(original_bgr, h, s, v)
 
-        # OCR 처리 (편집된 이미지에서 텍스트 인식)
-        _, edited_buffer = cv2.imencode('.png', edited_image)
-        edited_bytes = edited_buffer.tobytes()
-        ocr_result = self.ocr_service.process_image(edited_bytes)
+        # EasyOCR로 텍스트 인식 (바로 이미지 배열 전달)
+        ocr_results = self.ocr_reader.readtext(edited_image)
+
+        # 텍스트만 추출 (bbox, text, confidence 중에서 text만)
+        words = [text for (bbox, text, confidence) in ocr_results]
 
         # 응답 데이터 생성
         return {
             "message": "processed",
             "base64": self._encode_image_to_base64(edited_image),
-            "words": ocr_result["words"],
-            "word_count": ocr_result["count"]
+            "words": words,
+            "word_count": len(words)
         }

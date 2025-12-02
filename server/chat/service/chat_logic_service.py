@@ -131,8 +131,6 @@ def handle_chat_flow(state, chat_llm, summary_llm, analysis_llm):
             s_detail = _summarize_recent_chats(db, chat_order_id, summary_llm, limit=10)
             db.add(ChatSummary(chat_order_id=chat_order_id, summary_num=next_chat_num // 10, detail=s_detail))
             print(f"🧠 Summary created for chat_order={chat_order_num}")
-
-        if next_chat_num % 20 == 0:
             _analyze_interests(db, chat_order_id, analysis_llm, limit=20)
             print(f"🔍 Analysis created for chat_order={chat_order_num}")
 
