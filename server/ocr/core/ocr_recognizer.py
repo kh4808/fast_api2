@@ -8,11 +8,21 @@ class OCRRecognizer:
     def __init__(self, highlighter_padding: int = 5):
         self.highlighter_padding = highlighter_padding
 
-        # ✅ 원본과 동일한 PaddleOCR 설정 (predict 기반)
+        # ✅ 속도 최적화된 PaddleOCR 설정
         self.text_recognition = PaddleOCR(
+            # 불필요한 기능 끄기 (속도 향상)
             use_doc_unwarping=False,
-            use_textline_orientation=False,
             use_doc_orientation_classify=False,
+            use_angle_cls=False,              # 각도 분류 끄기 (30% 빠름)
+
+            # CPU 최적화
+            enable_mkldnn=True,               # Intel CPU 최적화
+            cpu_threads=4,                    # CPU 스레드 수
+
+            # 배치 처리 최적화
+            rec_batch_num=6,                  # 인식 배치 크기 (기본 6)
+            det_db_thresh=0.3,                # 탐지 임계값 (낮을수록 빠름)
+            det_db_box_thresh=0.5,            # 박스 임계값
         )
 
         self.remove_punctuation_translator = str.maketrans('', '', string.punctuation)

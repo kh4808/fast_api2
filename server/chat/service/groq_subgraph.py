@@ -59,11 +59,11 @@ llm = ChatOpenAI(
 from langchain_core.messages import SystemMessage
 from langchain_core.messages import HumanMessage
 from langchain_core.messages import AIMessage
-from langchain_tavily import TavilySearch
+from langchain_community.tools.tavily_search import TavilySearchResults
 
-tavily_tool = TavilySearch(
+tavily_tool = TavilySearchResults(
     max_results=5,
-    topic="general",
+    # topic="general",
     # include_answer=False,
     # include_raw_content=False,
     # include_images=False,
